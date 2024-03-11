@@ -1,6 +1,64 @@
 ## Spring核心技术与源码解析
 
+参考资料
+
+Java面试
+
+事务失效、设计模式
+
+补充笔记
+
+SpringBoot自动配置
+
 ### Bean
+
+#### XML配置相关基础知识
+
+以一段配置为例
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:aop="http://www.springframework.org/schema/aop"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/aop
+       http://www.springframework.org/schema/aop/spring-aop.xsd
+       http://www.springframework.org/schema/tx
+       http://www.springframework.org/schema/tx/spring-tx.xsd">
+</beans>
+```
+其中，xmlns="http://www.springframework.org/schema/beans"指定了命名空间，
+xsi:schemaLocation="http://www.springframework.org/schema/beans
+http://www.springframework.org/schema/beans/spring-beans.xsd"指定了约束的URL。
+
+xmlns="http://www.springframework.org/schema/beans"为默认标签，不用额外导入其他命名空间约束的标签；
+xmlns:aop和xmlns:tx为自定义标签，需要额外导入其他命名空间约束，并且通过前缀引用，如\<tx:annotation-driven>。
+
+默认的bean命名空间定义了如下四个标签。
+
+| 属性           | 作用                                            |
+| -------------- | ----------------------------------------------- |
+| beans           | XML配置根标签                                    |
+| bean           | 配置bean                                   |
+| import          | 外部资源导入                                   |
+| alias          | 指定bean的别名，使用少                            |
+
+
+- \<beans>标签
+  - 除了作为根标签外，还可以嵌套在根标签内，使用profile切换开发环境
+  - \<beans profile="test">
+  - 两种方式激活
+    - 命令行参数：-Dspring.profiles.active=test
+    - 设置环境变量：System.setProperty("spring.profiles.active", "test")
+- \<import>标签
+  - 举例：\<import resource="classpath:xxx.xml"/>
+- \<alias>标签
+  - \<alias name="userService" alias="xxx"> 
+  - 最终会在BeanFactory中维护一个aliasMap的集合，存储别名和beanName映射关系。
+
 
 #### BeanDefinition
 
@@ -15,16 +73,7 @@ BeanDefinition在Spring源码中为一个接口。为简化起间，先简单列
 | factory-method |                                                 |
 | init-method    |                                                 |
 | destroy-method |                                                 |
-| autowire-type  |                                                 |
-
-> scope失效
-
-#### Bean的创建
-
-FactoryBean
-
-FactoryBean会跳过一些Bean的生命周期。
-
+| autowire-type  | byName,byType                                   |
 
 
 #### Bean的生命周期
@@ -55,28 +104,353 @@ FactoryBean会跳过一些Bean的生命周期。
   - DisposableBean实现的destroy方法
   - bean中指定的init-method
 
-#### XML定义bean
+#### Bean的配置
 
-#### 注解定义bean
+> 三种Bean的实例化配置
+- 静态工厂方法实例化Bean
+- 实例工厂方法实例化Bean
+- 实现FactoryBean规范延迟实例化Bean
+
+XML配置方式
+
+案例1：配置DruidDataSource，需要设置四个重要字段，如代码所示：
+
+```java
+DruidDataSource dataSource = new DruidDataSource();
+dataSource.setDriverClassName(className);
+dataSource.setUrl(url);
+dataSource.setUsername(username);
+dataSource.setPassword(password);
+```
+
+无参构造，需要注入必要字段，对应XML配置
+```xml
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="jdbc:mysql://localhost:3306/mybatis"/>
+        <property name="username" value="root"/>
+        <property name="password" value="root"/>
+    </bean>
+```
+
+案例2：配置Connection
+
+```java
+Class.forName(className);
+Connection connection = DriverManager.getConnection(url, username, password);
+```
+
+Connection为接口，只能通过DriverManager.getConnection获取，可以看作是静态工厂方法实例化Bean。
+
+```xml
+    <bean id="clazz" class="java.lang.Class" factory-method="forName">
+        <constructor-arg name="className" value="com.mysql.jdbc.Driver"></constructor-arg>
+    </bean>
+
+    <bean id="connection" class="java.sql.DriverManager" factory-method="getConnection">
+        <constructor-arg name="url" value="jdbc:mysql://localhost:3306/mybatis"></constructor-arg>
+        <constructor-arg name="user" value="root"></constructor-arg>
+        <constructor-arg name="password" value="root"></constructor-arg>
+    </bean>
+```
+
+案例3：配置Date
+
+```java
+SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+Date date = simpleDateFormat.parse("2023-08-27 12:00:00");
+```
+
+Date通过SimpleDateFormat对象的parse方法创建，可以看作是实例工厂方法实例化Bean。
+
+```xml
+    <bean id="formatter" class="java.text.SimpleDateFormat">
+        <constructor-arg name="pattern" value="yyyy-MM-dd HH:mm:ss"/>
+    </bean>
+
+    <bean id="date" factory-bean="formatter" factory-method="parse">
+        <constructor-arg name="source" value="2024-03-11 12:00:00"/>
+    </bean>
+```
+
+注解配置方式
 
 | 注解           | 作用                                                         |
 | -------------- | ------------------------------------------------------------ |
-| @Component     | 标注该类需要交给Spring管理。需要通过ComponentScan指定扫描的basePackages。四个派生注解@Repository, @Service, @Controller, @Configuration |
+| @Component     | 自定义Bean，标注后交给Spring管理。需要通过ComponentScan指定扫描的basePackages。四个派生注解@Repository, @Service, @Controller, @Configuration |
 | @Configuration | 配置类，如使用@Bean定义工厂方法创建bean，配置类上必须加@Configuration |
-| @ComponentScan | 指定component注解扫描路径                                    |
-| @Bean          |                                                              |
-|                |                                                              |
+| @ComponentScan | 指定component注解扫描路径，和\<context:component-scan base-package="">等效                                    |
+| @Bean          | 非自定义Bean，通过工厂方式实例化，工厂方法所在类必须被Spring管理。beanName不指定，为当前工厂方法名。|
+|@Primary | 和Bean、Component注解一起使用，提高Bean优先级 |
+|@Profile | 用于环境切换 |
+
+如果@Bean工厂方法需要参数，有三种注入方式：
+- 使用@Autowired根据类型自动注入Bean，可省略。
+- 使用@Qualifier根据名称进行Bean匹配。
+- 使用@Value根据名称注入普通数据类型。
+
+> 组件扫描原理
+
+基于XML方式配置组件扫描，最终会根据URL定位到ContextNamespaceHandler，其注册了ComponentScanBeanDefinitionParser，通过ClassPathBeanDefinitionScanner扫描类路径，注册Bean到BeanDefinitionMap中去。
+
+基于注解方式，在AnnotationConfigApplicationContext的构造方法中，会创建一个AnnotatedBeanDefinitionReader，会通过AnnotationConfigUtils注册registerAnnotationConfigProcessors。
+
+总共注册了若干个BeanPostProcessor。beanName统一包含前缀org.springframework.context.annotation。
+
+| BeanName           | 后处理器                                                        |
+| -------------- | ------------------------------------------------------------ |
+| internalConfigurationAnnotationProcessor| ConfigurationClassPostProcessor | 
+| internalAutowiredAnnotationProcessor| AutowiredAnnotationBeanPostProcessor |
+| internalCommonAnnotationProcessor| CommonAnnotationBeanPostProcessor |
+
+源码体现：
+
+```java
+    if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
+		RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
+		def.setSource(source);
+		beanDefs.add(registerPostProcessor(registry, def, CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME));
+	}
+```
+无论是XML的ComponentScanBeanDefinitionParser，还是注解的ConfigurationClassPostProcessor，二者最终都会调用到ClassPathBeanDefinitionScanner的doScan方法，往BeanDefinitionMap中注册BeanDefinition。
+
+> 依赖注入配置
+
+数据类型
+- 普通数据类型，如String，int，boolean，通过value指定
+- 引用数据类型，通过ref指定
+- 集合数据类型，如List，Map，Properties
+```xml
+<bean class="...">
+    <property name="list">
+        <list> <!-- 集合则用<set>标签 -->
+            <value>onion</value>   <!-- 也可以用ref -->
+        </list>
+    </property>
+    <property name="map">
+        <map>
+            <entry key="" value=""></entry>
+            <entry key-ref="" value-ref=""></entry>
+        </map>
+    </property>
+     <property name="properties">
+        <props>
+            <prop key="key1">value1</prop>
+        </props>
+    </property>
+</bean>
+```
+
+注入方式
+- 通过set方法注入
+```xml
+<property name="..." ref="..."/>
+<property name="..." value="..."/>
+```
+- 通过构造方法注入
+```xml
+<constructor-arg name="..." ref="..."/>
+<constructor-arg name="..." value="..."/>
+```
+- 自动注入
+```xml
+<bean class="..." autowire="byType">
+```
+
+注解配置（字段或方法上）
+- @Value
+- @Autowired，根据类型注入
+- @Qualifier，结合@Autowired，根据名称注入
+- @Resource，根据名称注入
+
+#### 其他知识点
+
+> FactoryBean
+
+FactoryBean是一个特殊的工厂Bean，用于创建和管理其他Bean实例。其主要作用是用于创建一些较为复杂的产品。
+
+定义一个FactoryBean，需要指定泛型，重写三个方法。
+
+- getObjectType，指定产品的class类型
+- isSingleton，是否为单例。
+    - 如果是单例，创建出的产品会存储在factoryBeanObjectCache中
+    - 如果非单例，每次获取bean时均会调用一次getObject
+- getObject，定义产品的生成
+
+```java
+@Component("bean1")
+public class Bean1FactoryBean implements FactoryBean<Bean1> {
+
+    @Override
+    public Bean1 getObject() throws Exception {
+        System.out.println("create bean1");
+        return new Bean1();
+    }
+
+    @Override
+    public Class<?> getObjectType() {
+        return Bean1.class;
+    }
+
+    @Override
+    public boolean isSingleton() {
+        return true;
+    }
+}
+```
+
+被FactoryBean创建的产品，其依赖注入、Aware接口回调、前初始化的流程都不会走。（认为是FactoryBean的职责而非Spring的职责）
+
+后初始化的流程会走，产品可以被代理增强。
+
+验证：
+
+定义Bean1类，实现BeanFactoryAware。
+
+Bean1的工厂Bean代码见上一个代码块。Bean2为一个简单的由Spring管理的Bean，Bean1不由Spring管理，由其工厂Bean创建。
+
+验证点：
+- 依赖注入是否执行(setBean2)
+- Aware接口是否执行(setBeanFactory)
+- 初始化是否执行(init)
+
+```java
+public class Bean1 implements BeanFactoryAware {
+
+    private Bean2 bean2;
+
+    @Autowired
+    public void setBean2(Bean2 bean2) {
+        System.out.println("set bean2");
+        this.bean2 = bean2;
+    }
+
+    public Bean2 getBean2() {
+        return bean2;
+    }
+
+    @PostConstruct
+    public void init() {
+        System.out.println("init");
+    }
+
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) throws BeansException {
+        System.out.println("set beanFactory");
+    }
+}
+```
+BeanPostProcessor定义
+```java
+@Component
+public class Bean1PostProcessor implements BeanPostProcessor {
+    @Override
+    public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        if (beanName.equals("bean1") && bean instanceof Bean1) {
+            System.out.println("before initialization");
+        }
+        return bean;
+    }
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        if (beanName.equals("bean1") && bean instanceof Bean1) {
+            System.out.println("after initialization");
+        }
+        return bean;
+    }
+}
+```
+测试类
+```java
+@ComponentScan
+public class FactoryBeanTest {
+
+    public static void main(String[] args) {
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(FactoryBeanTest.class);
+        
+        Bean1 bean1 = (Bean1) context.getBean("bean1");
+        System.out.println(bean1);
+
+        Bean1FactoryBean factoryBean = (Bean1FactoryBean) context.getBean("&bean1");
+        System.out.println(factoryBean);
+        
+        context.close();
+    }
+}
+```
+结果：仅BeanPostProcessor的afterInitialization被执行。
+注意点：
+- 虽然Bean1FactoryBean指定的名字为bean1，但直接根据bean1取得的是产品Bean1的对象。
+- 如果要获得Bean1FactoryBean的对象，需要在name前加一个&，即第10行代码所示。
+- FactoryBean生成的对象不会放在单例池中，而是放在FactoryBeanRegistrySupport的factoryBeanObjectCache字段中。
 
 
+> scope失效问题
 
+单例bean依赖注入多例bean，必须在字段上添加@Lazy注解，否则多例scope会失效。
 
+原因：对于单例对象，依赖注入只发生了一次。
 
+使用Lazy注解后，代理对象还是同一个，但每次使用代理对象的任意方法时，由代理创建新的对象。
+解决方法
 
+- 方法1：字段上添加Lazy注解
+```java
+class Bean1 {
+    @Autowired
+    @Lazy
+    private Bean2 bean2;
+}
+```
+- 方法2：多例类上添加proxyMode
+```java
+@Scope(value = "prototype", proxyMode = ScopedProxyMode.TARGET_CLASS)
+class Bean2 {
+}
+```
+- 方法3：注入一个对象工厂ObjectFactory
+```java
+class Bean1 {
+    @Autowired
+    private ObjectFactory<Bean2> bean2;
+
+    public Bean2 getBean2() {
+        return bean2.getObject();
+    }
+}
+```
+- 方法4：注入ApplicationContext
+```java
+class Bean1 {
+    @Autowired
+    private ApplicationContext applicationContext;
+
+    public Bean2 getBean2() {
+        return context.getBean(Bean2.class);
+    }
+}
+```
 
 ### BeanFactory
 
-#### 继承结构
+#### 继承体系
 
+
+| 类   | 作用                                     |
+| ------------------------------- | ---------------------------------------- |
+| SingletonBeanRegistry | 单例注册、获取，如getSingleton和registerSingleton|
+| BeanDefinitionRegistry | BeanDefinition注册，如registerBeanDefinition |
+| ListableBeanFactory| Bean列举，如getBeanDefinitionNames|
+| ConfigurableBeanFactory | 配置，如addBeanPostProcessor，resolveEmbeddedValue和setConversionService等 |
+| AutowireCapableBeanFactory| 自动注入，如applyBeanPropertyValues，resolveDependency和applyBeanPostProcessorsBeforeInitialization等。 |
+| ConfigurableListableBeanFactory| 继承了上面三个BeanFactory，如preInstantiateSingletons提前实例化单例 |
+| 实现类 | |
+| DefaultSingletonBeanRegistry| 实现SingletonBeanRegistry，包含三级缓存的实现 |
+| FactoryBeanRegistrySupport| SingletonBeanRegistry子类，对FactoryBea进行缓存 |
+| AbstractBeanFactory | 实现ConfigurableBeanFactory，继承FactoryBeanRegistrySupport，持有beanPostProcessors列表引用 |
+| AbstractAutowireCapableBeanFactory | 实现AutowireCapableBeanFactory，完善了createBean的逻辑 |
+| DefaultListableBeanFactory | 实现ConfigurableListableBeanFactory，持有beanDefinitionMap |
 
 
 #### BeanFactoryPostProcessor
@@ -476,8 +850,6 @@ public class ValueTest {
 
 ```
 
-
-
 #### 循环依赖与三级缓存
 
 
@@ -498,8 +870,6 @@ Application间接继承BeanFactory，同时继承了如下四大接口
 | EnvironmentCapable        | 获取系统环境变量等配置信息 |
 
 > 下级
-
-
 
 ClassPathXMLApplicationContext
 
@@ -704,13 +1074,80 @@ Spring的Context在refresh时会
 | ---------------- | ---------- |
 | 目标 Target      | 被代理的类 |
 | 代理 Proxy       | 增强后的类 |
-| 连接点 JoinPoint |            |
-| 切点 Pointcut    |            |
-| 通知 Advice      |            |
-| 切面 Advisor     |            |
-| 切面 Aspect      |            |
+| 连接点 JoinPoint | 应用程序中可以被拦截的特定点，如方法调用、异常抛出           |
+| 切点 Pointcut    | 定义了在应用程序中哪些连接点需要被拦截的匹配规则           |
+| 通知 Advice      | 定义了在连接点执行前、执行后或抛出异常时需要执行的横切逻辑           |
+| 切面 Advisor     | 细粒度的切面，包含一个Advice。PointcutAdvisor包含一个Advice和Pointcut           |
+| 切面 Aspect      | 粗粒度的切面，包含一组或多组通知+切点。Aspect会拆解为Advisor           |
 
+#### 配置
 
+> 切点表达式
+
+execution([访问修饰符] 返回值类型 包名.类名.方法名(参数))
+
+- 访问修饰符可以省略。
+- 返回值类型、某一级包名、类名、方法名可以用*表示任意。
+- 包名与类名之间单点表示该包下的类，双点表示该包及其子包下的类。
+- 参数列表使用两个点表示任意参数。
+  
+> 通知
+
+| 通知| AspectJ注解| Advice接口| 时机                                             |
+| -------- | -------------- | -------------- |------------------- |
+| 前置通知 | @Before        | MethodBeforeAdvice | 目标方法执行前|
+| 后置通知 | @AfterReturning | AfterReturningAdvice |目标方法执行后且无异常                           |
+| 异常通知 | @AfterThrowing | ThrowsAdvice |目标方法执行抛出异常                             |
+| 最终通知 | @After         | AfterAdvice | 无论是否有异常均执行                             |
+| 环绕通知 | @Around        | MethodInterceptor | 目标方法执行前后执行。出现异常，环绕后方法不执行 |
+
+可传参数类型
+
+| 参数                | 作用                                                         |
+| ------------------- | ------------------------------------------------------------ |
+| JoinPoint           | 连接点对象，可以获得当前目标对象、方法参数等信息。getArgs()获取目标方法参数；getTarget()获取目标对象；getStaticPart获取精确的切点表达式信息。 |
+| ProceedingJoinPoint | JoinPoint子类，主要用于环绕通知中调用proceed进而执行目标方法 |
+| Throwable           | 异常对象，异常通知中使用，需要在配置文件中指出异常对象名称   |
+
+> 切面配置
+
+- 基于Aspect
+
+XML配置
+```xml
+<aop:config>
+    <aop:pointcut id="txPointcut" expression="execution(* com.alipay.demo.onion.UserService.*(..))"/>
+    <aop:aspect ref="txAdvice">
+        <aop:before method="before" pointcut-ref="txPointcut"></aop:before>
+        <aop:after-throwing method="afterThrowing" pointcut-ref="txPointcut"></aop:after-throwing>
+    </aop:aspect>
+</aop:config>
+```
+
+注解配置方式
+
+1. 定义一个类，类上标注@Aspect和@Component注解。
+2. 定义切点，定义一个方法，方法名任意，无需实现，方法上添加@Pointcut，写切点表达式。也可以在通知中指定pointcut，见第3步。
+3. 定义通知，方法上添加@Before等注解。对于@AfterThrowing，需要在注解中指定throwing。
+4. 配置类开启@EnableAspectJAutoProxy，用于解析AspectJ相关的注解。或者XML配置\<aop:aspectj-autoproxy>
+
+原理实现：参见AnnotationAwareAspectJAutoProxyCreator
+
+- 基于Advisor
+
+定义一个Advice类，根据通知类型，实现相应的接口，如MethodBeforeAdvice和AfterReturningAdvice。
+
+XML配置举例：
+```xml
+<aop:config>
+    <aop:pointcut id="txPointcut" expression="execution(* com.alipay.demo.onion.UserService.*(..))"/>
+    <aop:advisor advice-ref="txAdvice" pointcut-ref="txPointcut"/>
+</aop:config>
+```
+
+- 对比advisor和aspect
+1. advisor通过实现接口来确定通知类型，aspect通过配置确认通知类型。
+2. 一个advisor只能配置一个固定通知和一个切点表达式，一个aspect可以配置多个通知和多个表达式任意组合。
 
 #### 代理
 
@@ -988,47 +1425,7 @@ public class BeanProxyTest {
 
 - static方法、final方法和private方法均无法增强
 
-#### 实现原理解析
-
-> 切点表达式
-
-execution([访问修饰符] 返回值类型 包名.类名.方法名(参数))
-
-- 访问修饰符可以省略。
-- 返回值类型、某一级包名、类名、方法名可以用*表示任意。
-- 包名与类名之间单点表示该包下的类，双点表示该包及其子包下的类。
-- 参数列表使用两个点表示任意参数。
-  
-> 通知
-
-| 通知     | 配置           | 时机                                             |
-| -------- | -------------- | ------------------------------------------------ |
-| 前置通知 | @Before        | 目标方法执行前                                   |
-| 后置通知 | @AfterRetuning | 目标方法执行后且无异常                           |
-| 异常通知 | @AfterThrowing | 目标方法执行抛出异常                             |
-| 最终通知 | @After         | 无论是否有异常均执行                             |
-| 环绕通知 | @Around        | 目标方法执行前后执行。出现异常，环绕后方法不执行 |
-
-可传参数类型
-
-| 参数                | 作用                                                         |
-| ------------------- | ------------------------------------------------------------ |
-| JoinPoint           | 连接点对象，可以获得当前目标对象、方法参数等信息。getArgs()获取目标方法参数；getTarget()获取目标对象；getStaticPart获取精确的切点表达式信息。 |
-| ProceedingJoinPoint | JoinPoint子类，主要用于环绕通知中调用proceed进而执行目标方法 |
-| Throwable           | 异常对象，异常通知中使用，需要在配置文件中指出异常对象名称   |
-
-> 切面配置
-
-现介绍如何通过注解方式配置，XML配置方法类似。
-
-- 基于Aspect的配置方式
-
-1. 定义一个类，类上标注@Aspect和@Component注解。
-2. 定义切点，定义一个方法，方法名任意，无需实现，方法上添加@Pointcut，写切点表达式。也可以在通知中指定pointcut，见第3步。
-3. 定义通知，方法上添加@Before等注解。对于@AfterThrowing，需要在注解中指定throwing。
-4. 开启@EnableAspectJAutoProxy，用于解析AspectJ相关的注解。
-
-原理实现：参见AnnotationAwareAspectJAutoProxyCreator
+#### 实现原理
 
 > 切面顺序
 
@@ -1099,7 +1496,31 @@ public class PointcutTest {
 
 #### 源码解析
 
-关键类
+> XML配置AOP原理
+
+1. 根据Spring.handlers，定位到AopNamespaceHandler
+```java
+    @Override
+	public void init() {
+		registerBeanDefinitionParser("config", new ConfigBeanDefinitionParser());
+		registerBeanDefinitionParser("aspectj-autoproxy", new AspectJAutoProxyBeanDefinitionParser());
+		registerBeanDefinitionDecorator("scoped-proxy", new ScopedProxyBeanDefinitionDecorator());
+		registerBeanDefinitionParser("spring-configured", new SpringConfiguredBeanDefinitionParser());
+	}   
+```
+2. ConfigBeanDefinitionParser的parse方法中有一个configureAutoProxyCreator，查看其源代码。
+```java
+    private void configureAutoProxyCreator(ParserContext parserContext, Element element) {
+		AopNamespaceUtils.registerAspectJAutoProxyCreatorIfNecessary(parserContext, element);
+	}
+```
+3. 看到AspectJAwareAdvisorAutoProxyCreator类被注册，有关该类的源码在后续继续讲解。
+
+> 注解配置AOP原理
+
+如果是通过\<aop:aspectj-autoproxy>方式配置，根据handlers定位到AspectJAutoProxyBeanDefinitionParser，最终找到其注册的Bean是AnnotationAwareAspectJAutoProxyCreator，该类为AspectJAwareAdvisorAutoProxyCreator的子类。
+
+如果是通过@EnableAspectJAutoProxy注解配置，该注解标注了@Import(AspectJAutoProxyRegistrar.class)，其registerBeanDefinitions方法，通过AopConfigUtils.registerAspectJAnnotationAutoProxyCreatorIfNecessary(registry)进行了AnnotationAwareAspectJAutoProxyCreator的注入。
 
 > AdvisedSupport类
 
@@ -1153,6 +1574,184 @@ MethodInvocation
 
 
 ### 事务
+
+#### 隔离级别
+
+DEFAULT
+
+READ_UNCOMMITED
+
+READ_COMMITED
+
+REPEATABLE_READ
+
+SERIALIZABLE
+
+#### 传播行为
+
+| 传播行为          | 解释                                            |
+| -------------- | ----------------------------------------------- |
+| REQUIRED(默认) |  A调用B，B需要事务。A有事务，B加入A；A无事务，B创建一个事务                                               |
+| REQUIRED_NEW          |  A调用B，B需要事务。A有事务就挂起，B创建一个新事务 |
+| SUPPORTS | A调用B，B有无事务无所谓。A有事务，B加入A；A无事务B以非事务方式执行|
+| NOT_SUPPORTED | A调用B，B以无事务方式执行，A如有事务则挂起 |
+| NEVER | A调用B，B以无事务方式执行，A如有事务则抛出异常 |
+|MANDATORY| A调用B，B加入A的事务，如果A无事务则抛出异常 |
+|NESTED | A调用B，B创建一个新事务，A有事务则作为嵌套事务；A无事务则以创建的新事务执行 |
+
+#### 配置
+
+> XML配置
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:aop="http://www.springframework.org/schema/aop"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/aop
+       http://www.springframework.org/schema/aop/spring-aop.xsd
+       http://www.springframework.org/schema/tx
+       http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="jdbc:mysql://localhost:3306/mybatis"/>
+        <property name="username" value="root"/>
+        <property name="password" value="root"/>
+    </bean>
+
+    <bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <property name="dataSource" ref="dataSource"/>
+    </bean>
+
+    <tx:advice id="txAdvice" transaction-manager="transactionManager">
+        <tx:attributes>
+            <!-- 配置不同方法的事务属性，可以模糊匹配 -->
+            <tx:method name="*" propagation="REQUIRES_NEW" 
+                       isolation="READ_COMMITTED" read-only="false" timeout="3"/>
+        </tx:attributes>
+    </tx:advice>
+
+    <aop:config>
+        <!-- 切点表达式用于过滤哪些方法可以进行事务增强 -->
+        <aop:pointcut id="txPointcut" expression="execution(* com.alipay.demo.onion.UserService.*(..))"/>
+        <aop:advisor advice-ref="txAdvice" pointcut-ref="txPointcut"/>
+    </aop:config>
+
+</beans>
+```
+
+> 注解配置
+
+对于需要配置事务的方法，其方法上加@Transactional注解，可以在注解中配置propagation和isolation等元信息。也可以在类上配置。
+
+XML中的\<tx:advice>和\<aop:config>标签都可以省略，但需要在XML中再配置\<tx:annotation-driven/>。
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:tx="http://www.springframework.org/schema/tx"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+       http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://www.springframework.org/schema/tx
+       http://www.springframework.org/schema/tx/spring-tx.xsd">
+
+    <bean id="dataSource" class="com.alibaba.druid.pool.DruidDataSource">
+        <property name="driverClassName" value="com.mysql.jdbc.Driver"/>
+        <property name="url" value="jdbc:mysql://localhost:3306/mybatis"/>
+        <property name="username" value="root"/>
+        <property name="password" value="root"/>
+    </bean>
+
+    <bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+        <property name="dataSource" ref="dataSource"/>
+    </bean>
+
+    <tx:annotation-driven transaction-manager="transactionManager"/>
+</beans>
+```
+全注解模式
+```java
+@Configuration
+@PropertySource("classpath:jdbc.properties")
+@EnableTransactionManagement  // 相当于 tx:annotation-driven
+@MapperScan(basePackages = "")
+public class OnionTransactionConfig {
+
+    @Bean
+    public DataSource dataSource(@Value("${jdbc.driver}") String driver,
+                                 @Value("${jdbc.url}") String url,
+                                 @Value("${jdbc.username}") String username,
+                                 @Value("${jdbc.password}") String password) {
+        DruidDataSource dataSource = new DruidDataSource();
+        dataSource.setDriverClassName(driver);
+        dataSource.setUrl(url);
+        dataSource.setUsername(username);
+        dataSource.setPassword(password);
+        return dataSource;
+    }
+
+    @Bean
+    public SqlSessionFactoryBean sqlSessionFactoryBean(DataSource dataSource) {
+        SqlSessionFactoryBean sqlSessionFactoryBean = new SqlSessionFactoryBean();
+        sqlSessionFactoryBean.setDataSource(dataSource);
+        return sqlSessionFactoryBean;
+    }
+
+    @Bean
+    public DataSourceTransactionManager transactionManager(DataSource dataSource) {
+        DataSourceTransactionManager manager = new DataSourceTransactionManager();
+        manager.setDataSource(dataSource);
+        return manager;
+    }
+}
+```
+
+
+
+#### 事务失效经典场景
+
+- 抛出了受检异常
+  - 默认只会回滚非检查异常，即RuntimeException。
+  - 解决方法：指定rollbackFor = Exception.class
+- 业务方法内try-catch导致异常未能抛出
+  - 解决方法：重新抛出异常，或者手动设置TransactionInterceptor.currentTransactionStatus().setRollbackOnly()
+- 多个切面顺序
+  - 使用@Transactional，事务切面会在最外层。如果又配置了自定义切面，且在自定义切面中捕获了异常，则事务无法感知到异常，进而无法回滚。
+  - 解决方法：通过@Order设置自定义切面的优先级为Ordered.LOWEST_PRECEDENCE - 1(事务的优先级为Ordered.LOWEST_PRECEDENCE，优先级低的切面在外层)。
+- @Transactional注解加在了非public方法上
+  - 解决方法(不推荐)，以@Bean添加一个new AnnotationTransactionAttributeSource(false);
+- 
+
+
+
+
+#### 原理
+
+关键类：
+
+| 类          | 作用                                            |
+| -------------- | ----------------------------------------------- |
+|PlatformTransactionManager | |
+|TransactionDefinition | 事务的隔离级别、传播行为、过期时间 |
+|TransactionStatus | |
+|TransactionInfo | |
+|TransactionInterceptor | |
+
+源码阅读
+
+1. 查看TxNamespaceHandler，其init方法注册了TxAdviceBeanDefinitionParser。
+2. 阅读其doParse方法。
+3. 注入的tx-advice，往容器中注入了TransactionInterceptor类。
+4. 阅读TransactionInterceptor的invoke方法，其调用到invokeWithinTransaction方法。
+5. 
+
+
+
+
 
 ### 设计模式
 
@@ -1533,10 +2132,43 @@ http\://com.alipay.demo/onion=com.alipay.demo.onion.OnionNamespaceHandler
 
 2. 创建一个ClassPathXmlApplicationContext，指定spring.xml，通过context获取UserService的bean，查看是否会正确打印before和after。
 
+#### @Import
+第三方框架与Spring整合的xml方式是凭借自定义标签完成的，而注解方式整合很多是靠@Import注解完成。
 
+@Import可以导入三种类：
+- 普通配置类
+- 实现ImportSelector的类
+```java
+public class OnionImportSelector implements ImportSelector {
+    @Override
+    public String[] selectImports(AnnotationMetadata annotationMetadata) {
+        // 封装了当前使用了@Import注解的类上其他注解的元信息
+        Map<String, Object> annotationAttributes = annotationMetadata.getAnnotationAttributes(ComponentScan.class.getName());
+        annotationAttributes.forEach((name, value) -> {
+            System.out.println(name + "==" + value);
+        });
+        // 返回的数组为需要被注册到Spring容器中bean的全限定类名
+        return new String[]{UserService.class.getName()};
+    }
+}
+```
+- 实现ImportBeanDefinitionRegistrar的类
+  - 例如，MapperScan注解上标注了@Import({MapperScannerRegistrar.class})
+```java
+public class OnionImportBeanRegistrar implements ImportBeanDefinitionRegistrar {
+    @Override
+    public void registerBeanDefinitions(AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+        // 注册BeanDefinition
+    }
+}
+```
 
 
 
 
 
 ### SpringBoot
+
+#### 启动流程
+
+#### 自动装配原理
